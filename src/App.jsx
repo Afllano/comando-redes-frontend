@@ -6,7 +6,7 @@ import {
   TrendingUp, ChevronRight, ChevronLeft, CircleDot, Send, Lightbulb, Hash,
   Mic2, Film, LayoutTemplate, ScanFace, Pencil, Trash2, RefreshCw, Plug,
   Download, Upload, RotateCcw, Menu, CalendarRange, ArrowRight, Compass,
-  Globe, Search, AlertTriangle, Gauge, Activity, ExternalLink, Palette, Image as ImageIcon
+  Globe, Search, AlertTriangle, Gauge, Activity, ExternalLink, Palette, Image as ImageIcon, MapPin
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line,
@@ -31,6 +31,7 @@ const PLATFORMS = {
   facebook:  { name: "Facebook",  icon: Facebook,  color: "#1877F2", best: "mié–vie, 1–4pm" },
   tiktok:    { name: "TikTok",    icon: Film,      color: "#00E5D0", best: "mar–sáb, 6–10pm" },
   linkedin:  { name: "LinkedIn",  icon: Linkedin,  color: "#0A66C2", best: "mar–jue, 8–10am" },
+  google:    { name: "Google Business", icon: MapPin, color: "#4285F4", best: "actualizar foto/post 1x semana" },
 };
 const CONTENT_TYPES = ["Reel / Video corto", "Carrusel", "Post imagen", "Historia", "Artículo LinkedIn"];
 const STATUS_ORDER = ["idea", "draft", "approved", "scheduled", "published"];
@@ -172,7 +173,7 @@ export default function App() {
           {empty ? <Welcome onCreate={() => go("marcas")} onDemo={() => { setBrands(demoBrands); setPosts(demoPosts); toast("Datos de ejemplo cargados"); }} setBrands={setBrands} setPosts={setPosts} toast={toast} />
             : <>
               {view === "hoy" && <Hoy brands={brands} posts={posts} setView={go} setActiveBrand={setActiveBrand} />}
-              {view === "marcas" && <Marcas brands={brands} setBrands={setBrands} activeBrand={activeBrand} setActiveBrand={setActiveBrand} posts={posts} toast={toast} />}
+              {view === "marcas" && <Marcas brands={brands} setBrands={setBrands} activeBrand={activeBrand} setActiveBrand={setActiveBrand} posts={posts} setView={setView} toast={toast} />}
               {view === "estudio" && <Estudio brands={brands} setPosts={setPosts} toast={toast} activeBrand={activeBrand} />}
               {view === "tablero" && <Tablero brands={brands} posts={posts} setPosts={setPosts} toast={toast} />}
               {view === "calendario" && <Calendario brands={brands} posts={posts} setPosts={setPosts} />}
@@ -216,22 +217,57 @@ function Welcome({ onCreate, onDemo, setBrands, setPosts, toast }) {
           ))}
         </div>
       </div>
-      {wizard && <BrandWizard onClose={() => setWizard(false)} onSave={(b) => { setBrands([b]); toast("Marca creada"); setWizard(false); }} />}
+      {wizard && <BrandWizard toast={toast} onClose={() => setWizard(false)} onSave={(b) => { setBrands([b]); toast("Marca creada"); setWizard(false); }} />}
     </div>
   );
 }
 
 /* ============================ BRAND WIZARD (crear/editar) ============================ */
-function BrandWizard({ brand, onClose, onSave, onDelete }) {
+function BrandWizard({ brand, onClose, onSave, onDelete, toast = () => {} }) {
   const [step, setStep] = useState(0);
+  const [scanning, setScanning] = useState(false);
   const [b, setB] = useState(brand || { id: uid("b"), name: "", type: "", emoji: "🏢", color: ACCENT, website: "", gaId: "", logo: "", palette: [], objective: "", goalMetric: "", audience: "", tone: "", offers: "", networks: {}, faceless: true, pillars: [], cadence: "", lastAudit: null });
   const up = (k, v) => setB(p => ({ ...p, [k]: v }));
-  const toggleNet = (k) => setB(p => { const n = { ...(p.networks || {}) }; if (n[k] !== undefined) delete n[k]; else n[k] = "@" + (p.name || "marca").toLowerCase().replace(/\s/g, ""); return { ...p, networks: n }; });
+
+  const isHex = (c) => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c.trim());
+  const scanSite = async () => {
+    if (!b.website) { toast("Escribe primero el sitio web", "err"); return; }
+    setScanning(true);
+    try {
+      const res = await fetch(`${API}/api/scan-site`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: b.website }),
+      });
+      if (!res.ok) throw 0;
+      const r = await res.json();
+      if (!r || r.error) throw 0;
+      const palette = (r.palette || []).filter(isHex);
+      const primary = isHex(r.primary) ? r.primary : (palette[0] || b.color);
+      setB(p => ({
+        ...p,
+        name: r.name || p.name,
+        type: r.type || p.type,
+        objective: r.objective || p.objective,
+        goalMetric: r.goalMetric || p.goalMetric,
+        audience: r.audience || p.audience,
+        tone: r.tone || p.tone,
+        offers: r.offers || p.offers,
+        color: primary,
+        palette,
+        logo: r.logo && /^https?:\/\//.test(r.logo) ? r.logo : p.logo,
+        networks: (r.networks && Object.keys(r.networks).length) ? { ...p.networks, ...r.networks } : p.networks,
+      }));
+      const nNets = r.networks ? Object.keys(r.networks).length : 0;
+      toast(nNets ? `Sitio escaneado · ${nNets} red(es) detectada(s)` : "Sitio escaneado: revisa y ajusta lo que haga falta");
+    } catch { toast("No se pudo escanear el sitio. Llena los campos a mano o reintenta.", "err"); }
+    finally { setScanning(false); }
+  };
+  const toggleNet = (k) => setB(p => { const n = { ...(p.networks || {}) }; if (n[k] !== undefined) delete n[k]; else n[k] = k === "google" ? "" : "@" + (p.name || "marca").toLowerCase().replace(/\s/g, ""); return { ...p, networks: n }; });
   const steps = ["Identidad", "Objetivo", "Audiencia y voz", "Canales"];
   const canNext = [b.name && b.type, b.objective, b.audience && b.tone, Object.keys(b.networks).length > 0][step];
 
   return (
-    <Modal title={brand ? "Editar marca" : "Nueva marca"} onClose={onClose} wide>
+    <Modal title={brand ? "Editar marca" : "Nueva marca"} onClose={onClose} xl>
       <div className="flex items-center gap-2 mb-5">
         {steps.map((s, i) => (
           <React.Fragment key={i}>
@@ -246,28 +282,61 @@ function BrandWizard({ brand, onClose, onSave, onDelete }) {
 
       {step === 0 && <>
         <div className="grid grid-cols-2 gap-3"><Inp label="Nombre de la marca" v={b.name} on={v => up("name", v)} /><Inp label="Sector / tipo de negocio" v={b.type} on={v => up("type", v)} /></div>
-        <Inp label="Sitio web (opcional)" v={b.website} on={v => up("website", v)} className="mt-3" ph="https://tudominio.com" />
-        <Lbl className="mt-4">Ícono</Lbl>
-        <div className="flex flex-wrap gap-1.5 mt-1.5">{EMOJIS.map(e => <button key={e} onClick={() => up("emoji", e)} className="h-9 w-9 rounded-lg text-[18px] grid place-items-center" style={{ background: b.emoji === e ? "#161d2b" : "#0d121c", outline: b.emoji === e ? `2px solid ${b.color}` : "none" }}>{e}</button>)}</div>
-        <Lbl className="mt-4">Color (para identificar la marca de un vistazo)</Lbl>
-        <div className="flex gap-1.5 mt-1.5">{BRAND_COLORS.map(c => <button key={c} onClick={() => up("color", c)} className="h-8 w-8 rounded-lg" style={{ background: c, outline: b.color === c ? "2px solid #fff" : "none", outlineOffset: 1 }} />)}</div>
+        <div className="mt-3 flex gap-2 items-end">
+          <Inp label="Sitio web" v={b.website} on={v => up("website", v)} className="flex-1" ph="https://tudominio.com" />
+          <button onClick={scanSite} disabled={scanning || !b.website} className="flex items-center gap-1.5 text-[13px] font-medium px-4 py-2 rounded-lg shrink-0 disabled:opacity-40" style={{ background: ACCENT, color: "#0B0E14" }}>{scanning ? <><Loader2 size={15} className="animate-spin" /> Escaneando…</> : <><Search size={15} /> Escanear y autocompletar</>}</button>
+        </div>
+        <p className="text-[11px] text-[#7c87a0] mt-1.5">La IA visita el sitio y rellena nombre, sector, objetivo, audiencia, tono, oferta, logo y paleta de colores. Luego revisa y ajusta cada paso.</p>
+
+        <Lbl className="mt-4">Logo de la marca</Lbl>
+        <div className="flex items-center gap-3 mt-1.5">
+          <span className="h-14 w-14 rounded-xl grid place-items-center overflow-hidden shrink-0" style={{ background: `${b.color}1f` }}>
+            {b.logo ? <img src={b.logo} alt="logo" className="h-full w-full object-contain" onError={e => { e.currentTarget.style.display = "none"; }} /> : <ImageIcon size={22} style={{ color: "#6f7a90" }} />}
+          </span>
+          <input value={b.logo || ""} placeholder="URL del logo (se llena solo al escanear)" onChange={e => up("logo", e.target.value)} className="flex-1 rounded-lg bg-[#0d121c] border border-[#2a3344] px-3 py-2 text-[13px] text-[#e8ecf2] placeholder:text-[#7c87a0]" />
+          <label className="flex items-center gap-1.5 text-[12px] px-3 py-2 rounded-lg border border-[#2a3344] text-[#aeb6c6] hover:bg-[#161d2b] cursor-pointer shrink-0">
+            <Upload size={14} /> Subir
+            <input type="file" accept="image/*" className="hidden" onChange={e => {
+              const f = e.target.files?.[0]; if (!f) return;
+              if (f.size > 600 * 1024) { toast("Imagen muy pesada (máx 600 KB)", "err"); return; }
+              const reader = new FileReader();
+              reader.onload = () => up("logo", reader.result);
+              reader.readAsDataURL(f);
+            }} />
+          </label>
+        </div>
+        <p className="text-[11px] text-[#7c87a0] mt-1.5">El escaneo intenta tomar el logo solo. Si quedó mal o el sitio no tiene, pega una URL o sube tu archivo para reemplazarlo.</p>
+
+        <Lbl className="mt-4">Paleta de marca <span className="text-[#7c87a0] normal-case tracking-normal">— colores que usaremos para crear el contenido</span></Lbl>
+        {b.palette?.length > 0 ? (
+          <div className="flex flex-wrap gap-2 mt-1.5">
+            {b.palette.map((c, i) => (
+              <button key={i} onClick={() => up("color", c)} title={`${c}${b.color === c ? " (principal)" : ""}`} className="flex items-center gap-1.5 text-[11px] px-2 py-1.5 rounded-lg border" style={{ background: "#0d121c", borderColor: b.color === c ? "#fff" : "#2a3344", color: "#aeb6c6" }}>
+                <span className="h-4 w-4 rounded" style={{ background: c }} />{c}{b.color === c && <Check size={12} />}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-1.5 mt-1.5">{BRAND_COLORS.map(c => <button key={c} onClick={() => up("color", c)} className="h-8 w-8 rounded-lg" style={{ background: c, outline: b.color === c ? "2px solid #fff" : "none", outlineOffset: 1 }} />)}</div>
+        )}
+        <p className="text-[11px] text-[#7c87a0] mt-1.5">{b.palette?.length > 0 ? "Toca un color para marcarlo como principal. Escanea el sitio para detectar la paleta automáticamente." : "Aún sin paleta. Escanea el sitio arriba para detectar los colores de la marca."}</p>
       </>}
       {step === 1 && <>
         <p className="text-[12px] text-[#8A93A6] mb-3">¿Qué quieres lograr con esta cuenta? El objetivo guía todo lo que la IA proponga.</p>
-        <TextArea label="Objetivo principal" v={b.objective} on={v => up("objective", v)} ph="Ej: generar leads de pymes que necesitan asesoría contable" />
+        <TextArea label="Objetivo principal" rows={4} v={b.objective} on={v => up("objective", v)} ph="Ej: generar leads de pymes que necesitan asesoría contable" />
         <Inp label="Meta medible" v={b.goalMetric} on={v => up("goalMetric", v)} className="mt-3" ph="Ej: 15 leads / mes" />
       </>}
       {step === 2 && <>
-        <TextArea label="¿A quién le hablas? (audiencia)" v={b.audience} on={v => up("audience", v)} ph="Edad, perfil, qué les preocupa, qué buscan" />
-        <TextArea label="Tono de voz" v={b.tone} on={v => up("tone", v)} ph="Ej: profesional pero cercano, didáctico, da tranquilidad" />
-        <TextArea label="Oferta / servicios clave" v={b.offers} on={v => up("offers", v)} ph="Qué vendes o promocionas" />
+        <TextArea label="¿A quién le hablas? (audiencia)" rows={4} v={b.audience} on={v => up("audience", v)} ph="Edad, perfil, qué les preocupa, qué buscan" />
+        <TextArea label="Tono de voz" rows={3} v={b.tone} on={v => up("tone", v)} ph="Ej: profesional pero cercano, didáctico, da tranquilidad" />
+        <TextArea label="Oferta / servicios clave" rows={4} v={b.offers} on={v => up("offers", v)} ph="Qué vendes o promocionas" />
       </>}
       {step === 3 && <>
         <Lbl>Redes que vas a manejar</Lbl>
         <div className="flex gap-2 mt-1.5 flex-wrap">{Object.keys(PLATFORMS).map(k => { const P = PLATFORMS[k]; const I = P.icon; const on = b.networks?.[k] !== undefined; return (
           <button key={k} onClick={() => toggleNet(k)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border transition-colors" style={{ background: on ? `${P.color}22` : "#0d121c", borderColor: on ? `${P.color}66` : "#2a3344", color: on ? "#fff" : "#8A93A6" }}><I size={14} style={{ color: P.color }} />{P.name}{on && <Check size={13} />}</button>
         ); })}</div>
-        {Object.keys(b.networks).map(k => <Inp key={k} label={`Usuario en ${PLATFORMS[k].name}`} v={b.networks[k]} on={v => setB(p => ({ ...p, networks: { ...p.networks, [k]: v } }))} className="mt-3" />)}
+        {Object.keys(b.networks).map(k => <Inp key={k} label={k === "google" ? "Enlace de Google Business (g.page o maps.app.goo.gl)" : `Usuario en ${PLATFORMS[k].name}`} ph={k === "google" ? "https://g.page/tunegocio" : ""} v={b.networks[k]} on={v => setB(p => ({ ...p, networks: { ...p.networks, [k]: v } }))} className="mt-3" />)}
         <Inp label="ID de Google Analytics (GA4, opcional)" v={b.gaId} on={v => up("gaId", v)} className="mt-3" ph="G-XXXXXXXXXX" />
         <label className="flex items-center gap-2 mt-4 text-[13px] text-[#aeb6c6] cursor-pointer"><input type="checkbox" checked={b.faceless} onChange={e => up("faceless", e.target.checked)} className="accent-[#8B7BF7] h-4 w-4" /><Ghost size={15} style={{ color: "#8B7BF7" }} /> Cuenta sin rostro (no se muestra la cara)</label>
       </>}
@@ -275,7 +344,7 @@ function BrandWizard({ brand, onClose, onSave, onDelete }) {
       <div className="flex items-center justify-between mt-6 pt-5 border-t border-[#1b2230]">
         <div className="flex gap-2">
           {step > 0 ? <button onClick={() => setStep(s => s - 1)} className="flex items-center gap-1.5 text-[13px] px-4 py-2 rounded-lg border border-[#2a3344] text-[#aeb6c6]"><ChevronLeft size={15} /> Atrás</button> : <button onClick={onClose} className="text-[13px] px-4 py-2 rounded-lg border border-[#2a3344] text-[#aeb6c6]">Cancelar</button>}
-          {brand && onDelete && <button onClick={() => onDelete(b.id)} className="flex items-center gap-1.5 text-[12px] text-[#F25C9A] px-3 py-2 rounded-lg hover:bg-[#1a1320]"><Trash2 size={14} /> Eliminar</button>}
+          {brand && onDelete && <button onClick={() => { if (window.confirm(`¿Seguro que quieres eliminar la marca "${b.name}" y toda su información? Esta acción no se puede deshacer.`)) onDelete(b.id); }} className="flex items-center gap-1.5 text-[12px] text-[#F25C9A] px-3 py-2 rounded-lg hover:bg-[#1a1320]"><Trash2 size={14} /> Eliminar</button>}
         </div>
         {step < 3
           ? <button onClick={() => setStep(s => s + 1)} disabled={!canNext} className="flex items-center gap-1.5 text-[13px] font-medium px-5 py-2 rounded-lg disabled:opacity-40" style={{ background: ACCENT, color: "#0B0E14" }}>Siguiente <ChevronRight size={15} /></button>
@@ -331,11 +400,13 @@ function Hoy({ brands, posts, setView, setActiveBrand }) {
 }
 
 /* ============================ MARCAS ============================ */
-function Marcas({ brands, setBrands, activeBrand, setActiveBrand, posts, toast }) {
+function Marcas({ brands, setBrands, activeBrand, setActiveBrand, posts, setView, toast }) {
   const [editing, setEditing] = useState(null);
   const [stratLoad, setStratLoad] = useState(false);
   const [extracting, setExtracting] = useState(false);
-  const sel = brands.find(b => b.id === activeBrand) || brands[0];
+  const [openId, setOpenId] = useState(null);
+  const sel = brands.find(b => b.id === openId);
+  const openBrand = (id) => { setOpenId(id); setActiveBrand(id); };
 
   const isHex = (c) => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c.trim());
   const extractIdentity = async () => {
@@ -372,16 +443,31 @@ Da 4 pilares concretos para este negocio, en español.`;
     <div className="pb-16">
       <Header kicker="Workspaces" title="Marcas" sub="Cada empresa o cuenta vive aquí. La IA usa esta info para crear contenido a la medida."
         right={<button onClick={() => setEditing("new")} className="flex items-center gap-1.5 text-[13px] font-medium px-3.5 py-2 rounded-lg" style={{ background: ACCENT, color: "#0B0E14" }}><Plus size={16} /> Nueva</button>} />
-      <div className="px-4 md:px-8 pt-6 flex gap-2 flex-wrap">
-        {brands.map(b => <button key={b.id} onClick={() => setActiveBrand(b.id)} className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-[13px] border" style={{ background: sel?.id === b.id ? `${b.color}1f` : "#101622", borderColor: sel?.id === b.id ? `${b.color}66` : "#1b2230", color: sel?.id === b.id ? "#fff" : "#9099ab" }}><span>{b.emoji}</span> {b.name}</button>)}
-      </div>
+      {!sel && (
+        <div className="px-4 md:px-8 pt-6 grid grid-cols-2 lg:grid-cols-3 gap-3">
+          {brands.map(b => (
+            <button key={b.id} onClick={() => openBrand(b.id)} className="text-left rounded-2xl p-4 border hover:bg-[#131a27] transition-colors" style={{ background: "#101622", borderColor: `${b.color}26` }}>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="h-10 w-10 rounded-xl grid place-items-center text-[20px] shrink-0 overflow-hidden" style={{ background: `${b.color}1f` }}>{b.logo ? <img src={b.logo} alt="" className="h-full w-full object-contain" onError={e => { e.currentTarget.style.display = "none"; }} /> : b.emoji}</span>
+                <div className="min-w-0"><div className="disp font-semibold text-[14px] truncate">{b.name}</div><div className="text-[11px] text-[#8A93A6] truncate">{b.type}</div></div>
+              </div>
+              {b.goalMetric && <div className="mt-3"><Pill color={b.color} soft><Target size={11} />{b.goalMetric}</Pill></div>}
+              <div className="mt-3 flex items-center justify-between text-[11px] text-[#7c87a0]">
+                <span>{Object.keys(b.networks || {}).length} red(es)</span>
+                <span className="flex items-center gap-1 font-medium" style={{ color: b.color }}>Entrar <ChevronRight size={13} /></span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
       {sel && (
-        <div className="px-4 md:px-8 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="px-4 md:px-8 pt-5">
+        <button onClick={() => setOpenId(null)} className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-lg border border-[#2a3344] text-[#aeb6c6] hover:bg-[#161d2b] mb-4"><ChevronLeft size={15} /> Volver a marcas</button>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 rounded-2xl border border-[#1b2230] p-6" style={{ background: "#101622" }}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0"><span className="h-12 w-12 rounded-2xl grid place-items-center text-[24px] shrink-0 overflow-hidden" style={{ background: `${sel.color}1f` }}>{sel.logo ? <img src={sel.logo} alt="" className="h-full w-full object-contain" onError={e => { e.currentTarget.style.display = "none"; }} /> : sel.emoji}</span><div className="min-w-0"><h2 className="disp text-[20px] font-bold truncate">{sel.name}</h2><div className="text-[12px] text-[#8A93A6]">{sel.type}</div></div></div>
               <div className="flex gap-2 shrink-0">
-                <button onClick={extractIdentity} disabled={extracting} className="flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg border border-[#2a3344] text-[#aeb6c6] hover:bg-[#161d2b] disabled:opacity-60">{extracting ? <Loader2 size={13} className="animate-spin" /> : <Palette size={13} />} Identidad del sitio</button>
                 <button onClick={() => setEditing(sel)} className="flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg border border-[#2a3344] text-[#aeb6c6] hover:bg-[#161d2b]"><Pencil size={13} /> Editar</button>
               </div>
             </div>
@@ -416,8 +502,9 @@ Da 4 pilares concretos para este negocio, en español.`;
             </div>
           </div>
         </div>
+        </div>
       )}
-      {editing && <BrandWizard brand={editing === "new" ? null : editing} onClose={() => setEditing(null)}
+      {editing && <BrandWizard toast={toast} brand={editing === "new" ? null : editing} onClose={() => setEditing(null)}
         onSave={(b) => { setBrands(prev => prev.some(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]); setActiveBrand(b.id); setEditing(null); toast("Marca guardada"); }}
         onDelete={(id) => { setBrands(prev => prev.filter(x => x.id !== id)); setEditing(null); toast("Marca eliminada"); }} />}
     </div>
@@ -866,7 +953,8 @@ const Kpi = ({ label, value, sub, accent = "#E8ECF2" }) => (<div className="roun
 const Pill = ({ children, color, soft }) => (<span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: soft ? `${color}1f` : color, color: soft ? color : "#0B0E14", border: `1px solid ${color}33` }}>{children}</span>);
 const Lbl = ({ children, className = "" }) => <div className={`text-[11px] uppercase tracking-wider text-[#6f7a90] mono ${className}`}>{children}</div>;
 const Inp = ({ label, v, on, type = "text", className = "", ph = "" }) => (<div className={className}><Lbl>{label}</Lbl><input type={type} value={v} placeholder={ph} onChange={e => on(e.target.value)} className="w-full mt-1.5 rounded-lg bg-[#0d121c] border border-[#2a3344] px-3 py-2 text-[13px] text-[#e8ecf2] placeholder:text-[#7c87a0]" /></div>);
-const TextArea = ({ label, v, on, ph = "" }) => (<div className="mt-3"><Lbl>{label}</Lbl><textarea value={v} placeholder={ph} onChange={e => on(e.target.value)} rows={2} className="w-full mt-1.5 rounded-lg bg-[#0d121c] border border-[#2a3344] px-3 py-2 text-[13px] text-[#e8ecf2] placeholder:text-[#7c87a0] resize-none leading-relaxed" /></div>);
-function Modal({ title, children, onClose, wide }) {
-  return (<div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(5,7,11,0.72)" }} onClick={onClose}><div className={`w-full ${wide ? "max-w-xl" : "max-w-lg"} rounded-2xl border border-[#222a38] max-h-[90vh] overflow-y-auto`} style={{ background: "#101622" }} onClick={e => e.stopPropagation()}><div className="flex items-center justify-between px-6 py-4 border-b border-[#1b2230] sticky top-0 z-10" style={{ background: "#101622" }}><h3 className="disp font-bold text-[17px]">{title}</h3><button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-[#161d2b] text-[#8A93A6]"><X size={18} /></button></div><div className="p-6">{children}</div></div></div>);
+const TextArea = ({ label, v, on, ph = "", rows = 3 }) => (<div className="mt-3"><Lbl>{label}</Lbl><textarea value={v} placeholder={ph} onChange={e => on(e.target.value)} rows={rows} className="w-full mt-1.5 rounded-lg bg-[#0d121c] border border-[#2a3344] px-3 py-2 text-[14px] text-[#e8ecf2] placeholder:text-[#7c87a0] resize-y leading-relaxed" /></div>);
+function Modal({ title, children, onClose, wide, xl }) {
+  const maxW = xl ? "max-w-3xl" : wide ? "max-w-xl" : "max-w-lg";
+  return (<div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(5,7,11,0.72)" }} onClick={onClose}><div className={`w-full ${maxW} rounded-2xl border border-[#222a38] max-h-[92vh] overflow-y-auto`} style={{ background: "#101622" }} onClick={e => e.stopPropagation()}><div className="flex items-center justify-between px-6 py-4 border-b border-[#1b2230] sticky top-0 z-10" style={{ background: "#101622" }}><h3 className="disp font-bold text-[17px]">{title}</h3><button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-[#161d2b] text-[#8A93A6]"><X size={18} /></button></div><div className="p-6">{children}</div></div></div>);
 }
