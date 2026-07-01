@@ -840,37 +840,24 @@ function WebAnalytics({ brands, setBrands, toast }) {
   const [urlDraft, setUrlDraft] = useState("");
   useEffect(() => { setUrlDraft(brand?.website || ""); }, [brand?.id]);
 
-  const demo = useMemo(() => ({
-    users: seededSeries(brand.id + "u", 320, 130),
-    sessions: seededSeries(brand.id + "s", 470, 190),
-    conv: seededSeries(brand.id + "c", 7, 5),
-  }), [brand.id]);
-  const [gaReal, setGaReal] = useState(null);
+  const [gaData, setGaData] = useState(null);
   const [gaLoading, setGaLoading] = useState(false);
   const [gaError, setGaError] = useState("");
+  const [range, setRange] = useState("28d");
   useEffect(() => {
-    setGaReal(null); setGaError("");
+    setGaData(null); setGaError("");
     if (!brand.gaId) return;
     setGaLoading(true);
-    fetch(`${API}/api/analytics?gaId=${encodeURIComponent(brand.gaId)}`)
+    fetch(`${API}/api/analytics?gaId=${encodeURIComponent(brand.gaId)}&range=${range}`)
       .then(r => r.json())
-      .then(r => { if (r.error) throw new Error(r.error); setGaReal(r.days || []); })
+      .then(r => { if (r.error) throw new Error(r.error); setGaData(r); })
       .catch(e => setGaError(e.message || "No se pudo cargar Analytics"))
       .finally(() => setGaLoading(false));
-  }, [brand.id, brand.gaId]);
+  }, [brand.id, brand.gaId, range]);
 
-  const isReal = !!gaReal;
-  const ga = isReal ? {
-    users: gaReal.map(d => ({ d: d.date.slice(4), v: d.users })),
-    sessions: gaReal.map(d => ({ d: d.date.slice(4), v: d.sessions })),
-    conv: gaReal.map(d => ({ d: d.date.slice(4), v: d.conversions })),
-  } : demo;
-  const sources = [["Búsqueda orgánica", 42, "#9BE15D"], ["Redes sociales", 28, "#7BA7F7"], ["Directo", 18, "#F2C14E"], ["Referidos", 12, "#8B7BF7"]];
-  const topPages = [["/", "Inicio"], ["/servicios", "Servicios"], ["/contacto", "Contacto"], ["/blog", "Blog"]];
-  const totalUsers = ga.users.reduce((a, x) => a + x.v, 0);
-  const totalSessions = ga.sessions.reduce((a, x) => a + x.v, 0);
-  const totalConv = ga.conv.reduce((a, x) => a + x.v, 0);
-  const avgEngagement = isReal && gaReal.length ? Math.round((gaReal.reduce((a, d) => a + d.engagementRate, 0) / gaReal.length) * 100) : null;
+  const isReal = !!gaData;
+  const T = gaData?.totals || {};
+  const series = (gaData?.series || []).map(d => ({ d: (d.date || "").slice(4), users: d.users, sessions: d.sessions }));
 
   const daysSince = brand.lastAudit ? Math.floor((Date.now() - new Date(brand.lastAudit.date).getTime()) / 86400000) : null;
   const due = daysSince === null || daysSince >= 15;
@@ -940,35 +927,121 @@ Devuelve SOLO JSON válido sin markdown:
 
       {/* GOOGLE ANALYTICS */}
       <div className="px-4 md:px-8 pt-6">
-        {!brand.gaId && <div className="rounded-lg border border-[#3a3220] px-4 py-2.5 text-[12px] text-[#F2C14E] flex items-center gap-2 mb-4" style={{ background: "#1a1610" }}><CircleDot size={14} /> Reporte de demostración. Agrega el ID de propiedad GA4 en "Editar marca → Canales" para ver datos reales.</div>}
+        {!brand.gaId && <div className="rounded-lg border border-[#3a3220] px-4 py-2.5 text-[12px] text-[#F2C14E] flex items-center gap-2 mb-4" style={{ background: "#1a1610" }}><CircleDot size={14} /> Agrega el ID de propiedad GA4 en "Editar marca → Canales" para ver el reporte real.</div>}
         {brand.gaId && gaError && <div className="rounded-lg border border-[#4a2020] px-4 py-2.5 text-[12px] text-[#F2879A] flex items-center gap-2 mb-4" style={{ background: "#1a1013" }}><AlertTriangle size={14} /> No se pudo conectar con GA4: {gaError}</div>}
-        {brand.gaId && !gaError && !gaLoading && isReal && <div className="rounded-lg border border-[#1f3a2a] px-4 py-2.5 text-[12px] text-[#9BE15D] flex items-center gap-2 mb-4" style={{ background: "#0f1a13" }}><CircleDot size={14} /> Datos reales de Google Analytics 4.</div>}
         <div className="rounded-2xl border border-[#1b2230] p-5" style={{ background: "#101622" }}>
           <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
             <div className="flex items-center gap-2.5"><span className="h-10 w-10 rounded-xl grid place-items-center" style={{ background: "#F2980022" }}><Activity size={19} style={{ color: "#F29800" }} /></span><div><div className="disp font-semibold text-[15px]">Google Analytics</div><div className="text-[12px] text-[#8A93A6]">{brand.gaId ? `Propiedad ${brand.gaId}` : "Sin propiedad GA4 configurada"}</div></div></div>
-            {gaLoading ? <Pill color="#F2C14E" soft><Loader2 size={11} className="animate-spin" />Cargando…</Pill> : isReal ? <Pill color="#9BE15D" soft><Check size={11} />Conectado</Pill> : <Pill color="#F2C14E" soft><Clock size={11} />Pendiente de conexión</Pill>}
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Kpi label="Usuarios (30d)" value={totalUsers.toLocaleString()} sub="visitantes únicos" accent={brand.color} />
-            <Kpi label="Sesiones (30d)" value={totalSessions.toLocaleString()} sub="visitas totales" />
-            <Kpi label="Tasa interacción" value={avgEngagement !== null ? avgEngagement + "%" : (58 + (brand.id.charCodeAt(brand.id.length - 1) % 12)) + "%"} sub="sesiones activas" />
-            <Kpi label="Conversiones" value={totalConv} sub="leads / acciones clave" accent={ACCENT} />
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-            <div className="lg:col-span-2"><Chart title="Usuarios por día" color={brand.color}><AreaChart data={ga.users}><defs><linearGradient id="ga1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={brand.color} stopOpacity={0.4} /><stop offset="100%" stopColor={brand.color} stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="#1b2230" vertical={false} /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "#7c87a0" }} interval={6} /><YAxis tick={{ fontSize: 10, fill: "#7c87a0" }} width={34} /><Tooltip contentStyle={tt} /><Area type="monotone" dataKey="v" stroke={brand.color} fill="url(#ga1)" strokeWidth={2} /></AreaChart></Chart></div>
-            <div className="rounded-2xl border border-[#1b2230] p-4" style={{ background: "#101622" }}>
-              <div className="text-[12px] text-[#aeb6c6] font-medium mb-3">Fuentes de tráfico</div>
-              <div className="space-y-2.5">{sources.map(([n, p, c]) => <div key={n}><div className="flex justify-between text-[12px] mb-1"><span className="text-[#aeb6c6]">{n}</span><span className="mono" style={{ color: c }}>{p}%</span></div><div className="h-1.5 rounded-full bg-[#0d121c]"><div className="h-1.5 rounded-full" style={{ width: p + "%", background: c }} /></div></div>)}</div>
-              <div className="text-[12px] text-[#aeb6c6] font-medium mt-5 mb-2">Páginas top</div>
-              <div className="space-y-1.5">{topPages.map(([u, n], i) => <div key={u} className="flex items-center justify-between text-[12px]"><span className="text-[#cfd5e0]">{n} <span className="text-[#7c87a0] mono">{u}</span></span><span className="mono text-[#8A93A6]">{Math.round(totalUsers * [0.4, 0.25, 0.2, 0.15][i]).toLocaleString()}</span></div>)}</div>
+            <div className="flex items-center gap-2">
+              {gaLoading ? <Pill color="#F2C14E" soft><Loader2 size={11} className="animate-spin" />Cargando…</Pill> : isReal ? <Pill color="#9BE15D" soft><Check size={11} />Datos reales</Pill> : <Pill color="#F2C14E" soft><Clock size={11} />Sin conectar</Pill>}
+              {brand.gaId && <div className="flex rounded-lg border border-[#2a3344] overflow-hidden">
+                {[["7d", "7 días"], ["28d", "28 días"], ["90d", "3 meses"], ["12m", "12 meses"]].map(([k, lbl]) => (
+                  <button key={k} onClick={() => setRange(k)} className="text-[12px] px-2.5 py-1.5" style={{ background: range === k ? ACCENT : "transparent", color: range === k ? "#0B0E14" : "#9099ab", fontWeight: range === k ? 600 : 400 }}>{lbl}</button>
+                ))}
+              </div>}
             </div>
           </div>
-          <p className="text-[11px] text-[#7c87a0] mt-4">{isReal ? "Usuarios, sesiones e interacción son datos reales de GA4 (últimos 30 días). Fuentes y páginas top siguen en demo — llegan en la siguiente iteración." : "Con GA4 conectado, este reporte se actualiza solo cada día con usuarios, sesiones, interacción, conversiones, fuentes, páginas top, embudo y comparativa contra el periodo anterior."}</p>
+
+          {!brand.gaId ? (
+            <p className="text-[13px] text-[#7c87a0] py-6 text-center">Conecta la propiedad GA4 de esta marca para ver usuarios, audiencia, ciudades, fuentes, páginas top, dispositivos y clics en botones — todo aquí, sin entrar a Google Analytics.</p>
+          ) : gaLoading ? (
+            <div className="grid place-items-center py-14"><Loader2 size={26} className="animate-spin" style={{ color: ACCENT }} /></div>
+          ) : isReal ? (
+            <div className="space-y-5">
+              {/* KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi label="Usuarios" value={(T.users || 0).toLocaleString()} sub={`${(T.newUsers || 0).toLocaleString()} nuevos`} accent={brand.color} />
+                <Kpi label="Sesiones" value={(T.sessions || 0).toLocaleString()} sub={`${(T.pageViews || 0).toLocaleString()} páginas vistas`} />
+                <Kpi label="Duración media" value={fmtDur(T.avgSessionDuration)} sub="por sesión" />
+                <Kpi label="Interacción" value={Math.round((T.engagementRate || 0) * 100) + "%"} sub={`rebote ${Math.round((T.bounceRate || 0) * 100)}%`} accent={ACCENT} />
+              </div>
+
+              {/* Serie temporal */}
+              <Chart title="Usuarios y sesiones por día" color={brand.color}>
+                <AreaChart data={series}>
+                  <defs><linearGradient id="ga1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={brand.color} stopOpacity={0.4} /><stop offset="100%" stopColor={brand.color} stopOpacity={0} /></linearGradient></defs>
+                  <CartesianGrid stroke="#1b2230" vertical={false} /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "#7c87a0" }} interval={Math.ceil(series.length / 8)} /><YAxis tick={{ fontSize: 10, fill: "#7c87a0" }} width={34} /><Tooltip contentStyle={tt} />
+                  <Area type="monotone" dataKey="users" name="Usuarios" stroke={brand.color} fill="url(#ga1)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="sessions" name="Sesiones" stroke="#7BA7F7" fill="transparent" strokeWidth={1.5} />
+                </AreaChart>
+              </Chart>
+
+              {/* Audiencia: genero + edad */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <GaBlock title="Género" empty={!gaData.gender?.length} emptyMsg="Activa Google Signals en GA4 para ver género y edad.">
+                  {(gaData.gender || []).map(g => <BarRow key={g.label} label={g.label} value={g.users} max={Math.max(...gaData.gender.map(x => x.users))} color={brand.color} />)}
+                </GaBlock>
+                <GaBlock title="Rango de edad" empty={!gaData.age?.length} emptyMsg="Activa Google Signals en GA4 para ver edad.">
+                  {(gaData.age || []).map(g => <BarRow key={g.label} label={g.label} value={g.users} max={Math.max(...gaData.age.map(x => x.users))} color="#8B7BF7" />)}
+                </GaBlock>
+              </div>
+
+              {/* Geografia + dispositivos */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <GaBlock title="Ciudades" empty={!gaData.cities?.length}>
+                  {(gaData.cities || []).map(c => <BarRow key={c.label} label={c.label} value={c.users} max={Math.max(...gaData.cities.map(x => x.users))} color="#3DD6C4" />)}
+                </GaBlock>
+                <GaBlock title="Países" empty={!gaData.countries?.length}>
+                  {(gaData.countries || []).map(c => <BarRow key={c.label} label={c.label} value={c.users} max={Math.max(...gaData.countries.map(x => x.users))} color="#7BA7F7" />)}
+                </GaBlock>
+                <GaBlock title="Dispositivos" empty={!gaData.devices?.length}>
+                  {(gaData.devices || []).map(c => <BarRow key={c.label} label={c.label === "mobile" ? "Móvil" : c.label === "desktop" ? "Escritorio" : c.label === "tablet" ? "Tablet" : c.label} value={c.users} max={Math.max(...gaData.devices.map(x => x.users))} color="#F2C14E" />)}
+                </GaBlock>
+              </div>
+
+              {/* Fuentes / canales */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <GaBlock title="Canales (cómo llegan)" empty={!gaData.channels?.length}>
+                  {(gaData.channels || []).map(c => <BarRow key={c.label} label={chLabel(c.label)} value={c.sessions} max={Math.max(...gaData.channels.map(x => x.sessions))} color="#9BE15D" />)}
+                </GaBlock>
+                <GaBlock title="Fuentes (origen)" empty={!gaData.sources?.length}>
+                  {(gaData.sources || []).map(c => <BarRow key={c.label} label={c.label} value={c.sessions} max={Math.max(...gaData.sources.map(x => x.sessions))} color="#F28D6B" />)}
+                </GaBlock>
+              </div>
+
+              {/* Paginas top */}
+              <GaBlock title="Páginas más visitadas" empty={!gaData.pages?.length}>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 text-[12px]">
+                  <div className="text-[10px] uppercase tracking-wider text-[#6f7a90] mono">Página</div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#6f7a90] mono text-right">Vistas</div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#6f7a90] mono text-right">T. medio</div>
+                  {(gaData.pages || []).map(p => <React.Fragment key={p.path}>
+                    <div className="text-[#cfd5e0] truncate" title={p.title}>{p.title || p.path} <span className="text-[#7c87a0] mono text-[11px]">{p.path}</span></div>
+                    <div className="mono text-[#aeb6c6] text-right">{p.views.toLocaleString()}</div>
+                    <div className="mono text-[#8A93A6] text-right">{fmtDur(p.avgTime)}</div>
+                  </React.Fragment>)}
+                </div>
+              </GaBlock>
+
+              {/* Eventos / CTA */}
+              <GaBlock title="Eventos y clics (botones, formularios, CTA)" empty={!gaData.events?.length}>
+                <div className="flex flex-wrap gap-2">
+                  {(gaData.events || []).map(e => <div key={e.name} className="flex items-center gap-2 rounded-lg bg-[#0d121c] border border-[#1b2230] px-2.5 py-1.5"><span className="text-[12px] text-[#cfd5e0]">{e.name}</span><span className="mono text-[12px]" style={{ color: ACCENT }}>{e.count.toLocaleString()}</span></div>)}
+                </div>
+                <p className="text-[11px] text-[#7c87a0] mt-3">Los clics en botones de llamado a la acción aparecen aquí como eventos (ej. <span className="mono">click</span>, <span className="mono">form_start</span>, <span className="mono">generate_lead</span>). Para medir un botón específico se configura un evento en GA4.</p>
+              </GaBlock>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
+// Helpers del dashboard de Analytics
+const fmtDur = (s) => { s = Math.round(s || 0); const m = Math.floor(s / 60); const r = s % 60; return m > 0 ? `${m}m ${r}s` : `${r}s`; };
+const chLabel = (c) => ({ "Organic Search": "Búsqueda orgánica", "Direct": "Directo", "Referral": "Referidos", "Organic Social": "Redes sociales", "Paid Search": "Búsqueda pagada", "Unassigned": "Sin asignar", "Email": "Correo", "Display": "Display" }[c] || c);
+const GaBlock = ({ title, children, empty, emptyMsg }) => (
+  <div className="rounded-2xl border border-[#1b2230] p-4" style={{ background: "#0f141f" }}>
+    <div className="text-[12px] text-[#aeb6c6] font-medium mb-3">{title}</div>
+    {empty ? <p className="text-[11px] text-[#7c87a0] py-2">{emptyMsg || "Sin datos en este periodo."}</p> : <div className="space-y-2">{children}</div>}
+  </div>
+);
+const BarRow = ({ label, value, max, color }) => (
+  <div>
+    <div className="flex justify-between text-[12px] mb-1 gap-2"><span className="text-[#aeb6c6] truncate" title={label}>{label}</span><span className="mono shrink-0" style={{ color }}>{(value || 0).toLocaleString()}</span></div>
+    <div className="h-1.5 rounded-full bg-[#0d121c]"><div className="h-1.5 rounded-full" style={{ width: (max ? Math.max(3, (value / max) * 100) : 0) + "%", background: color }} /></div>
+  </div>
+);
 
 /* ============================ shared bits ============================ */
 const Header = ({ kicker, title, sub, right }) => (<div className="flex items-start justify-between gap-4 px-4 md:px-8 pt-7 md:pt-8 pb-5 border-b border-[#161d2b]"><div className="min-w-0"><div className="text-[11px] tracking-[0.2em] uppercase mono mb-1.5" style={{ color: ACCENT }}>{kicker}</div><h1 className="disp text-[22px] md:text-[26px] font-bold leading-tight">{title}</h1>{sub && <p className="text-[13px] text-[#8A93A6] mt-1 max-w-xl">{sub}</p>}</div>{right && <div className="shrink-0">{right}</div>}</div>);
