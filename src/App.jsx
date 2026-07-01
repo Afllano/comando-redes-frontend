@@ -840,16 +840,37 @@ function WebAnalytics({ brands, setBrands, toast }) {
   const [urlDraft, setUrlDraft] = useState("");
   useEffect(() => { setUrlDraft(brand?.website || ""); }, [brand?.id]);
 
-  const ga = useMemo(() => ({
+  const demo = useMemo(() => ({
     users: seededSeries(brand.id + "u", 320, 130),
     sessions: seededSeries(brand.id + "s", 470, 190),
     conv: seededSeries(brand.id + "c", 7, 5),
   }), [brand.id]);
+  const [gaReal, setGaReal] = useState(null);
+  const [gaLoading, setGaLoading] = useState(false);
+  const [gaError, setGaError] = useState("");
+  useEffect(() => {
+    setGaReal(null); setGaError("");
+    if (!brand.gaId) return;
+    setGaLoading(true);
+    fetch(`${API}/api/analytics?gaId=${encodeURIComponent(brand.gaId)}`)
+      .then(r => r.json())
+      .then(r => { if (r.error) throw new Error(r.error); setGaReal(r.days || []); })
+      .catch(e => setGaError(e.message || "No se pudo cargar Analytics"))
+      .finally(() => setGaLoading(false));
+  }, [brand.id, brand.gaId]);
+
+  const isReal = !!gaReal;
+  const ga = isReal ? {
+    users: gaReal.map(d => ({ d: d.date.slice(4), v: d.users })),
+    sessions: gaReal.map(d => ({ d: d.date.slice(4), v: d.sessions })),
+    conv: gaReal.map(d => ({ d: d.date.slice(4), v: d.conversions })),
+  } : demo;
   const sources = [["Búsqueda orgánica", 42, "#9BE15D"], ["Redes sociales", 28, "#7BA7F7"], ["Directo", 18, "#F2C14E"], ["Referidos", 12, "#8B7BF7"]];
   const topPages = [["/", "Inicio"], ["/servicios", "Servicios"], ["/contacto", "Contacto"], ["/blog", "Blog"]];
   const totalUsers = ga.users.reduce((a, x) => a + x.v, 0);
   const totalSessions = ga.sessions.reduce((a, x) => a + x.v, 0);
   const totalConv = ga.conv.reduce((a, x) => a + x.v, 0);
+  const avgEngagement = isReal && gaReal.length ? Math.round((gaReal.reduce((a, d) => a + d.engagementRate, 0) / gaReal.length) * 100) : null;
 
   const daysSince = brand.lastAudit ? Math.floor((Date.now() - new Date(brand.lastAudit.date).getTime()) / 86400000) : null;
   const due = daysSince === null || daysSince >= 15;
@@ -919,16 +940,18 @@ Devuelve SOLO JSON válido sin markdown:
 
       {/* GOOGLE ANALYTICS */}
       <div className="px-4 md:px-8 pt-6">
-        <div className="rounded-lg border border-[#3a3220] px-4 py-2.5 text-[12px] text-[#F2C14E] flex items-center gap-2 mb-4" style={{ background: "#1a1610" }}><CircleDot size={14} /> Reporte de demostración. Conecta Google Analytics 4 (API + OAuth) para datos reales y reporte diario automático.</div>
+        {!brand.gaId && <div className="rounded-lg border border-[#3a3220] px-4 py-2.5 text-[12px] text-[#F2C14E] flex items-center gap-2 mb-4" style={{ background: "#1a1610" }}><CircleDot size={14} /> Reporte de demostración. Agrega el ID de propiedad GA4 en "Editar marca → Canales" para ver datos reales.</div>}
+        {brand.gaId && gaError && <div className="rounded-lg border border-[#4a2020] px-4 py-2.5 text-[12px] text-[#F2879A] flex items-center gap-2 mb-4" style={{ background: "#1a1013" }}><AlertTriangle size={14} /> No se pudo conectar con GA4: {gaError}</div>}
+        {brand.gaId && !gaError && !gaLoading && isReal && <div className="rounded-lg border border-[#1f3a2a] px-4 py-2.5 text-[12px] text-[#9BE15D] flex items-center gap-2 mb-4" style={{ background: "#0f1a13" }}><CircleDot size={14} /> Datos reales de Google Analytics 4.</div>}
         <div className="rounded-2xl border border-[#1b2230] p-5" style={{ background: "#101622" }}>
           <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
             <div className="flex items-center gap-2.5"><span className="h-10 w-10 rounded-xl grid place-items-center" style={{ background: "#F2980022" }}><Activity size={19} style={{ color: "#F29800" }} /></span><div><div className="disp font-semibold text-[15px]">Google Analytics</div><div className="text-[12px] text-[#8A93A6]">{brand.gaId ? `Propiedad ${brand.gaId}` : "Sin propiedad GA4 configurada"}</div></div></div>
-            <Pill color="#F2C14E" soft><Clock size={11} />Pendiente de conexión</Pill>
+            {gaLoading ? <Pill color="#F2C14E" soft><Loader2 size={11} className="animate-spin" />Cargando…</Pill> : isReal ? <Pill color="#9BE15D" soft><Check size={11} />Conectado</Pill> : <Pill color="#F2C14E" soft><Clock size={11} />Pendiente de conexión</Pill>}
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Kpi label="Usuarios (30d)" value={totalUsers.toLocaleString()} sub="visitantes únicos" accent={brand.color} />
             <Kpi label="Sesiones (30d)" value={totalSessions.toLocaleString()} sub="visitas totales" />
-            <Kpi label="Tasa interacción" value={(58 + (brand.id.charCodeAt(brand.id.length - 1) % 12)) + "%"} sub="sesiones activas" />
+            <Kpi label="Tasa interacción" value={avgEngagement !== null ? avgEngagement + "%" : (58 + (brand.id.charCodeAt(brand.id.length - 1) % 12)) + "%"} sub="sesiones activas" />
             <Kpi label="Conversiones" value={totalConv} sub="leads / acciones clave" accent={ACCENT} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
@@ -940,7 +963,7 @@ Devuelve SOLO JSON válido sin markdown:
               <div className="space-y-1.5">{topPages.map(([u, n], i) => <div key={u} className="flex items-center justify-between text-[12px]"><span className="text-[#cfd5e0]">{n} <span className="text-[#7c87a0] mono">{u}</span></span><span className="mono text-[#8A93A6]">{Math.round(totalUsers * [0.4, 0.25, 0.2, 0.15][i]).toLocaleString()}</span></div>)}</div>
             </div>
           </div>
-          <p className="text-[11px] text-[#7c87a0] mt-4">Con GA4 conectado, este reporte se actualiza solo cada día con usuarios, sesiones, interacción, conversiones, fuentes, páginas top, embudo y comparativa contra el periodo anterior.</p>
+          <p className="text-[11px] text-[#7c87a0] mt-4">{isReal ? "Usuarios, sesiones e interacción son datos reales de GA4 (últimos 30 días). Fuentes y páginas top siguen en demo — llegan en la siguiente iteración." : "Con GA4 conectado, este reporte se actualiza solo cada día con usuarios, sesiones, interacción, conversiones, fuentes, páginas top, embudo y comparativa contra el periodo anterior."}</p>
         </div>
       </div>
     </div>
