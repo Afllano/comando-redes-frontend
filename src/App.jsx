@@ -857,7 +857,9 @@ function WebAnalytics({ brands, setBrands, toast }) {
 
   const isReal = !!gaData;
   const T = gaData?.totals || {};
-  const series = (gaData?.series || []).map(d => ({ d: (d.date || "").slice(4), users: d.users, sessions: d.sessions }));
+  const fmtDay = (ymd) => { const s = String(ymd || ""); if (s.length !== 8) return s; const mes = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]; return `${+s.slice(6, 8)} ${mes[+s.slice(4, 6) - 1]}`; };
+  const series = (gaData?.series || []).map(d => ({ d: fmtDay(d.date), users: d.users, sessions: d.sessions }));
+  const rangeLabel = series.length ? `${series[0].d} – ${series[series.length - 1].d} · ${series.length} días con datos` : "";
 
   const daysSince = brand.lastAudit ? Math.floor((Date.now() - new Date(brand.lastAudit.date).getTime()) / 86400000) : null;
   const due = daysSince === null || daysSince >= 15;
@@ -957,14 +959,29 @@ Devuelve SOLO JSON válido sin markdown:
               </div>
 
               {/* Serie temporal */}
-              <Chart title="Usuarios y sesiones por día" color={brand.color}>
-                <AreaChart data={series}>
-                  <defs><linearGradient id="ga1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={brand.color} stopOpacity={0.4} /><stop offset="100%" stopColor={brand.color} stopOpacity={0} /></linearGradient></defs>
-                  <CartesianGrid stroke="#1b2230" vertical={false} /><XAxis dataKey="d" tick={{ fontSize: 10, fill: "#7c87a0" }} interval={Math.ceil(series.length / 8)} /><YAxis tick={{ fontSize: 10, fill: "#7c87a0" }} width={34} /><Tooltip contentStyle={tt} />
-                  <Area type="monotone" dataKey="users" name="Usuarios" stroke={brand.color} fill="url(#ga1)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="sessions" name="Sesiones" stroke="#7BA7F7" fill="transparent" strokeWidth={1.5} />
-                </AreaChart>
-              </Chart>
+              <div className="rounded-2xl border border-[#1b2230] p-4" style={{ background: "#0f141f" }}>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <div>
+                    <div className="text-[12px] text-[#aeb6c6] font-medium">Usuarios y sesiones por día</div>
+                    <div className="text-[11px] text-[#7c87a0] mt-0.5">{rangeLabel}</div>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: brand.color }} />Usuarios</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#7BA7F7" }} />Sesiones</span>
+                  </div>
+                </div>
+                <ResponsiveContainer width="100%" height={230}>
+                  <AreaChart data={series} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                    <defs><linearGradient id="ga1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={brand.color} stopOpacity={0.35} /><stop offset="100%" stopColor={brand.color} stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid stroke="#1b2230" vertical={false} />
+                    <XAxis dataKey="d" tick={{ fontSize: 11, fill: "#8A93A6" }} interval="preserveStartEnd" minTickGap={28} tickMargin={8} axisLine={{ stroke: "#1b2230" }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#8A93A6" }} width={40} allowDecimals={false} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={tt} />
+                    <Area type="monotone" dataKey="users" name="Usuarios" stroke={brand.color} fill="url(#ga1)" strokeWidth={2.5} dot={series.length <= 14 ? { r: 2.5, fill: brand.color } : false} />
+                    <Area type="monotone" dataKey="sessions" name="Sesiones" stroke="#7BA7F7" fill="transparent" strokeWidth={2} strokeDasharray="4 3" dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
 
               {/* Audiencia: genero + edad */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
